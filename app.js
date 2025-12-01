@@ -420,54 +420,74 @@ function updateDoctorDropdowns() {
 }
 
 // ============================================
-// GEMINI INTEGRATION - FIXED WITH PROPER ASYNC
+// GEMINI INTEGRATION - NO FALLBACK, MUST WORK
 // ============================================
 async function getPredictedDuration(reason) {
-    try {
-        const response = await fetch(GEMINI_API_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [{
-                        text: `You are a medical scheduling AI. A patient visits a clinic with this reason: "${reason}". Based on typical medical practice, estimate the appointment duration in minutes. Answer with ONLY a number between 10 and 60.`
-                    }]
-                }],
-                generationConfig: {
-                    temperature: 0.1,
-                    maxOutputTokens: 10
-                }
-            })
-        });
+    let retries = 0;
+    const maxRetries = 3;
+    
+    while (retries < maxRetries) {
+        try {
+            console.log(`🤖 Gemini attempt ${retries + 1}/${maxRetries} for reason: "${reason}"`);
+            
+            const response = await fetch(GEMINI_API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{
+                            text: `You are a medical scheduling AI. A patient visits a clinic with this reason: "${reason}". Based on typical medical practice, estimate the appointment duration in minutes. Answer with ONLY a number between 10 and 60. Do not include any other text, just the number.`
+                        }]
+                    }],
+                    generationConfig: {
+                        temperature: 0.1,
+                        maxOutputTokens: 10
+                    }
+                })
+            });
 
-        const data = await response.json();
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+            }
 
-        // --- Handle all known Gemini response formats ---
-        let text =
-            data?.candidates?.[0]?.content?.parts?.[0]?.text ||          // Format A
-            data?.candidates?.[0]?.content?.[0]?.parts?.[0]?.text ||     // Format B
-            data?.candidates?.[0]?.output ||                             // Some proxies return {output:"20"}
-            null;
+            const data = await response.json();
+            console.log("📥 Gemini raw response:", JSON.stringify(data, null, 2));
 
-        if (!text) {
-            console.warn("Gemini error: unexpected response format", data);
-            return 15;
+            // Handle all known Gemini response formats
+            let text =
+                data?.candidates?.[0]?.content?.parts?.[0]?.text ||          // Format A
+                data?.candidates?.[0]?.content?.[0]?.parts?.[0]?.text ||     // Format B
+                data?.candidates?.[0]?.output ||                             // Some proxies
+                null;
+
+            if (!text) {
+                throw new Error("No text in Gemini response: " + JSON.stringify(data));
+            }
+
+            const clean = text.trim().replace(/\D/g, ""); // extract only digits
+            const duration = parseInt(clean);
+
+            if (isNaN(duration) || duration < 10 || duration > 60) {
+                throw new Error(`Invalid duration parsed: "${text}" → ${duration}`);
+            }
+
+            console.log(`✅ Gemini success: ${duration} minutes`);
+            return duration;
+
+        } catch (err) {
+            retries++;
+            console.error(`❌ Gemini attempt ${retries} failed:`, err.message);
+            
+            if (retries < maxRetries) {
+                // Wait before retry (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+            } else {
+                // All retries exhausted
+                throw new Error(`Gemini failed after ${maxRetries} attempts: ${err.message}`);
+            }
         }
-
-        const clean = text.trim().replace(/\D/g, ""); // extract digits
-        const duration = parseInt(clean);
-
-        if (duration >= 10 && duration <= 60) return duration;
-
-        console.warn("Gemini returned invalid duration:", text);
-        return 15;
-
-    } catch (err) {
-        console.error("Gemini fetch failed:", err);
-        return 15;
     }
 }
-
 // ============================================
 // UPDATED ADD PATIENT FUNCTIONS
 // ============================================
@@ -1380,5 +1400,6 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
