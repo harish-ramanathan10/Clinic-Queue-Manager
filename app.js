@@ -27,8 +27,7 @@ let cachedQueue = [];
 let isProcessingAutomation = false;
 
 // Gemini API Configuration
-const GEMINI_API_KEY = "AIzaSyCdXxqaC1Wenpd0G3ihGcH9liAhI28_4Qs";
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // Twilio Configuration
 const TWILIO_ENDPOINT = "/.netlify/functions/send-sms";
@@ -374,9 +373,10 @@ function updateDoctorDropdowns() {
 // ============================================
 
 async function getPredictedDuration(reason) {
+  const modelName = "gemini-2.5-flash";  // ← use a valid, supported model
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -395,20 +395,23 @@ async function getPredictedDuration(reason) {
     );
 
     const data = await response.json();
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    alert(JSON.stringify(data, null, 2));
 
-    const duration = parseInt(rawText.replace(/\D/g, ""));
-    alert(duration);
-    if (!isNaN(duration) && duration >= 10 && duration <= 60) {
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const duration = parseInt(rawText.replace(/\D/g, ""), 10);
+
+    if (!isNaN(duration) && duration >= 5 && duration <= 60) {
       return duration;
+    } else {
+      console.warn("Gemini returned unclear value → fallback used");
+      return 7;
     }
-    console.warn("Gemini returned unclear value → fallback used");
-    return 20;
   } catch (e) {
-    console.warn("Gemini request failed → fallback used");
-    return 20;
+    console.warn("Gemini request failed → fallback used", e);
+    return 7;
   }
 }
+
 
 // ============================================
 // ADD PATIENT FUNCTIONS
@@ -1280,6 +1283,7 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
 
