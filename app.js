@@ -21,12 +21,16 @@ let unsubscribeQueue = null;
 let unsubscribeNotifications = null;
 let updateInterval = null;
 
+// Cache for reducing reads
+let cachedRooms = [];
+let cachedQueue = [];
+
 // Gemini API Configuration
 const GEMINI_API_KEY = "AIzaSyCdXxqaC1Wenpd0G3ihGcH9liAhI28_4Qs";
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`;
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-// Twilio Configuration (Backend endpoint needed)
-const TWILIO_ENDPOINT = "/api/send-sms"; // Your Netlify function endpoint
+// Twilio Configuration - Correct endpoint
+const TWILIO_ENDPOINT = "/.netlify/functions/send-sms";
 
 // ============================================
 // INITIALIZATION
@@ -47,25 +51,21 @@ window.addEventListener('load', () => {
 });
 
 function setupEventListeners() {
-    // Auth buttons
     document.getElementById('createAccountBtn').addEventListener('click', createAccount);
     document.getElementById('backToLoginBtn').addEventListener('click', showLogin);
     document.getElementById('loginBtn').addEventListener('click', login);
     document.getElementById('showAddAccountBtn').addEventListener('click', showAddAccount);
     document.getElementById('logoutBtn').addEventListener('click', logout);
     
-    // Dashboard buttons
     document.getElementById('settingsBtn').addEventListener('click', openSettings);
     document.getElementById('patientLinkBtn').addEventListener('click', showPatientLink);
     document.getElementById('addPatientBtn').addEventListener('click', addPatient);
     document.getElementById('addPatientMobileBtn').addEventListener('click', addPatientFromMobile);
     
-    // Settings
     document.getElementById('closeSettingsBtn').addEventListener('click', closeSettings);
     document.getElementById('numRooms').addEventListener('change', updateRoomCount);
     document.getElementById('addDoctorBtn').addEventListener('click', addDoctor);
     
-    // Modals
     document.getElementById('closeLinkBtn').addEventListener('click', closeLinkModal);
     document.getElementById('closeAssignBtn').addEventListener('click', closeAssignDoctor);
     document.getElementById('closeSwapBtn').addEventListener('click', closeSwap);
@@ -122,7 +122,6 @@ async function createAccount() {
     }
 
     try {
-        // Check if clinic name exists
         const existing = await db.collection('clinics')
             .where('name', '==', name)
             .get();
@@ -146,7 +145,6 @@ async function createAccount() {
             patientLink: `${baseUrl}?clinic=${clinicId}`
         });
 
-        // Initialize rooms
         const roomsRef = db.collection('clinics').doc(clinicId).collection('rooms');
         for (let i = 0; i < 4; i++) {
             await roomsRef.add({
@@ -221,22 +219,18 @@ async function logout() {
     if (!currentClinic) return;
 
     try {
-        // Clear all patient-related data
         const clinicId = currentClinic.id;
         
-        // Clear queue
         const queueSnapshot = await db.collection('clinics').doc(clinicId)
             .collection('queue').get();
         const queueDeletes = queueSnapshot.docs.map(doc => doc.ref.delete());
         await Promise.all(queueDeletes);
 
-        // Clear notifications
         const notifSnapshot = await db.collection('clinics').doc(clinicId)
             .collection('notifications').get();
         const notifDeletes = notifSnapshot.docs.map(doc => doc.ref.delete());
         await Promise.all(notifDeletes);
 
-        // Reset rooms to available
         const roomsSnapshot = await db.collection('clinics').doc(clinicId)
             .collection('rooms').get();
         const roomUpdates = roomsSnapshot.docs.map(doc => 
@@ -248,7 +242,6 @@ async function logout() {
         );
         await Promise.all(roomUpdates);
 
-        // Cleanup
         if (unsubscribeRooms) unsubscribeRooms();
         if (unsubscribeQueue) unsubscribeQueue();
         if (unsubscribeNotifications) unsubscribeNotifications();
@@ -353,7 +346,6 @@ function showDashboard() {
     initializeDashboard();
     setupRealtimeListeners();
     
-    // Start update interval for timers and automation
     if (updateInterval) clearInterval(updateInterval);
     updateInterval = setInterval(() => {
         renderRooms();
@@ -376,24 +368,20 @@ async function initializeDashboard() {
 function setupRealtimeListeners() {
     const clinicId = currentClinic.id;
 
-    // Listen to rooms
     unsubscribeRooms = db.collection('clinics').doc(clinicId)
         .collection('rooms')
         .orderBy('order')
         .onSnapshot(snapshot => {
-            renderRooms();
+            cachedRooms = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
         });
 
-    // Listen to queue
     unsubscribeQueue = db.collection('clinics').doc(clinicId)
         .collection('queue')
         .orderBy('addedTime')
         .onSnapshot(snapshot => {
-            renderQueue();
-            processAutomation();
+            cachedQueue = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
         });
 
-    // Listen to notifications
     unsubscribeNotifications = db.collection('clinics').doc(clinicId)
         .collection('notifications')
         .orderBy('timestamp', 'desc')
@@ -423,11 +411,10 @@ function updateDoctorDropdowns() {
 }
 
 // ============================================
-// GEMINI INTEGRATION
+// GEMINI INTEGRATION - FIXED
 // ============================================
 
 async function getPredictedDuration(reason) {
-    // Fallback durations
     const commonDurations = {
         'checkup': 15,
         'consultation': 20,
@@ -447,7 +434,6 @@ async function getPredictedDuration(reason) {
         }
     }
 
-    // Try Gemini API
     try {
         const response = await fetch(GEMINI_API_URL, {
             method: 'POST',
@@ -457,17 +443,22 @@ async function getPredictedDuration(reason) {
             body: JSON.stringify({
                 contents: [{
                     parts: [{
-                        text: `Given this reason for a medical clinic visit: "${reason}", estimate how long a typical appointment would take in minutes. Respond with ONLY a number between 5 and 10.`
+                        text: `You are a medical scheduling assistant. Based on this reason for a clinic visit: "${reason}", estimate the typical appointment duration in minutes. Consider standard medical practice. Respond with ONLY a single number between 10 and 60 representing minutes. No explanation, just the number.`
                     }]
-                }]
+                }],
+                generationConfig: {
+                    temperature: 0.1,
+                    maxOutputTokens: 10
+                }
             })
         });
 
         if (response.ok) {
             const data = await response.json();
-            const text = data.candidates[0].content.parts[0].text;
-            const duration = parseInt(text.match(/\d+/)?.[0]);
-            if (duration && duration >= 5 && duration <= 60) {
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            const duration = parseInt(text?.match(/\d+/)?.[0]);
+            if (duration && duration >= 10 && duration <= 60) {
+                console.log(`Gemini predicted ${duration} minutes for: ${reason}`);
                 return duration;
             }
         }
@@ -475,65 +466,56 @@ async function getPredictedDuration(reason) {
         console.error('Gemini API error:', error);
     }
 
-    return 15; // Default fallback
+    return 15;
 }
 
 // ============================================
 // ROOM RENDERING & MANAGEMENT
 // ============================================
 
-async function renderRooms() {
+function renderRooms() {
     if (!currentClinic) return;
 
     const grid = document.getElementById('roomsGrid');
     if (!grid) return;
 
-    try {
-        const snapshot = await db.collection('clinics').doc(currentClinic.id)
-            .collection('rooms')
-            .orderBy('order')
-            .get();
+    const rooms = cachedRooms;
+    grid.innerHTML = '';
 
-        grid.innerHTML = '';
+    rooms.forEach(room => {
+        const card = document.createElement('div');
+        card.className = `room-card ${room.state}`;
+        
+        let content = `
+            <div class="room-header">
+                <div class="room-name">${room.name}</div>
+                <div class="room-status status-${room.state}">
+                    ${room.state.charAt(0).toUpperCase() + room.state.slice(1)}
+                </div>
+            </div>
+            <div class="room-doctor" onclick="window.openAssignDoctor('${room.docId}')">
+                ${room.assignedDoctors.join(', ')}
+            </div>
+        `;
 
-        snapshot.forEach(doc => {
-            const room = { docId: doc.id, ...doc.data() };
-            const card = document.createElement('div');
-            card.className = `room-card ${room.state}`;
-            
-            let content = `
-                <div class="room-header">
-                    <div class="room-name">${room.name}</div>
-                    <div class="room-status status-${room.state}">
-                        ${room.state.charAt(0).toUpperCase() + room.state.slice(1)}
-                    </div>
+        if (room.state === 'available') {
+            // NO FILL BUTTON for available state per specifications
+        } else if (room.patient) {
+            content += `
+                <div class="room-patient-info">
+                    <div><strong>${room.patient.name}</strong></div>
+                    <div>Doctor: ${room.patient.doctor}</div>
+                    <div>Reason: ${room.patient.reason}</div>
                 </div>
-                <div class="room-doctor" onclick="window.openAssignDoctor('${room.docId}')">
-                    ${room.assignedDoctors.join(', ')}
-                </div>
+                <div class="room-timer">${getTimerDisplay(room)}</div>
+                <div class="timer-label">${room.state === 'reserved' ? 'TIME WAITING' : 'TIME REMAINING'}</div>
+                ${getActionButtons(room)}
             `;
+        }
 
-            if (room.state === 'available') {
-                content += `<button class="btn-fill" onclick="window.fillRoom('${room.docId}')">Fill</button>`;
-            } else if (room.patient) {
-                content += `
-                    <div class="room-patient-info">
-                        <div><strong>${room.patient.name}</strong></div>
-                        <div>Doctor: ${room.patient.doctor}</div>
-                        <div>Reason: ${room.patient.reason}</div>
-                    </div>
-                    <div class="room-timer">${getTimerDisplay(room)}</div>
-                    <div class="timer-label">${room.state === 'reserved' ? 'TIME WAITING' : 'TIME REMAINING'}</div>
-                    ${getActionButtons(room)}
-                `;
-            }
-
-            card.innerHTML = content;
-            grid.appendChild(card);
-        });
-    } catch (error) {
-        console.error('Error rendering rooms:', error);
-    }
+        card.innerHTML = content;
+        grid.appendChild(card);
+    });
 }
 
 function getTimerDisplay(room) {
@@ -576,62 +558,6 @@ function getActionButtons(room) {
     }
     return '';
 }
-
-// Room actions (exposed globally)
-window.fillRoom = async function(roomDocId) {
-    try {
-        const queueSnapshot = await db.collection('clinics').doc(currentClinic.id)
-            .collection('queue')
-            .orderBy('addedTime')
-            .get();
-
-        const roomDoc = await db.collection('clinics').doc(currentClinic.id)
-            .collection('rooms')
-            .doc(roomDocId)
-            .get();
-
-        const room = roomDoc.data();
-        
-        let patientDoc = null;
-        for (const doc of queueSnapshot.docs) {
-            const patient = doc.data();
-            if (canPatientGoToRoom(patient, room)) {
-                patientDoc = doc;
-                break;
-            }
-        }
-
-        if (!patientDoc) {
-            alert('No compatible patients in queue');
-            return;
-        }
-
-        const patient = patientDoc.data();
-        
-        // Move patient to room
-        await roomDoc.ref.update({
-            patient: {
-                id: patientDoc.id,
-                name: patient.name,
-                phone: patient.phone,
-                doctor: patient.doctor,
-                reason: patient.reason,
-                predictedDuration: patient.predictedDuration
-            },
-            state: 'reserved',
-            timerStart: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        // Remove from queue
-        await patientDoc.ref.delete();
-
-        // Send notifications
-        await sendNotification(patient, 'immediate', room.name, patientDoc.id);
-        await sendNotification(patient, 'advanced', room.name, patientDoc.id);
-    } catch (error) {
-        console.error('Error filling room:', error);
-    }
-};
 
 window.markHere = async function(roomDocId) {
     try {
@@ -680,10 +606,10 @@ window.completeAppointment = async function(roomDocId) {
 };
 
 // ============================================
-// QUEUE RENDERING & MANAGEMENT
+// QUEUE RENDERING & MANAGEMENT - FIXED JITTERING
 // ============================================
 
-async function renderQueue() {
+function renderQueue() {
     if (!currentClinic) return;
 
     const queueList = document.getElementById('queueList');
@@ -691,91 +617,36 @@ async function renderQueue() {
     
     if (!queueList || !queueCount) return;
 
-    try {
-        const snapshot = await db.collection('clinics').doc(currentClinic.id)
-            .collection('queue')
-            .orderBy('addedTime')
-            .get();
+    const queue = cachedQueue;
+    
+    queueCount.textContent = `${queue.length} waiting`;
 
-        const queue = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
-        
-        queueCount.textContent = `${queue.length} waiting`;
-        queueList.innerHTML = '';
-
-        if (queue.length === 0) {
+    if (queue.length === 0) {
+        if (queueList.innerHTML !== '<div class="notification-empty">No patients in queue</div>') {
             queueList.innerHTML = '<div class="notification-empty">No patients in queue</div>';
-            return;
         }
+        return;
+    }
 
-        for (let i = 0; i < queue.length; i++) {
-            const patient = queue[i];
-            const waitTime = await calculateWaitTime(patient, i);
-            const addedTime = patient.addedTime?.toDate ? patient.addedTime.toDate() : new Date(patient.addedTime);
-            
-            const card = document.createElement('div');
-            card.className = 'queue-card';
-            card.innerHTML = `
+    const currentHTML = queueList.innerHTML;
+    let newHTML = '';
+
+    for (let i = 0; i < queue.length; i++) {
+        const patient = queue[i];
+        const addedTime = patient.addedTime?.toDate ? patient.addedTime.toDate() : new Date(patient.addedTime);
+        
+        newHTML += `
+            <div class="queue-card">
                 <div class="queue-position">#${i + 1} ${patient.name}</div>
                 <div class="queue-detail">Doctor: ${patient.doctor}</div>
                 <div class="queue-detail">${patient.reason}</div>
-                <div class="queue-detail">${addedTime.toLocaleTimeString()} · ~${waitTime} min wait</div>
-            `;
-            queueList.appendChild(card);
-        }
-    } catch (error) {
-        console.error('Error rendering queue:', error);
+                <div class="queue-detail">${addedTime.toLocaleTimeString()}</div>
+            </div>
+        `;
     }
-}
 
-async function calculateWaitTime(patient, position) {
-    try {
-        const roomsSnapshot = await db.collection('clinics').doc(currentClinic.id)
-            .collection('rooms')
-            .get();
-
-        const queueSnapshot = await db.collection('clinics').doc(currentClinic.id)
-            .collection('queue')
-            .orderBy('addedTime')
-            .get();
-
-        const rooms = roomsSnapshot.docs.map(doc => doc.data());
-        const queue = queueSnapshot.docs.map(doc => doc.data());
-        
-        let availableTimes = [];
-        
-        rooms.forEach(room => {
-            if (!canPatientGoToRoom(patient, room)) return;
-            
-            let availableAt = Date.now();
-            
-            if (room.state === 'occupied' && room.patient && room.timerStart) {
-                const startTime = room.timerStart.toMillis ? room.timerStart.toMillis() : room.timerStart;
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                const remaining = (room.patient.predictedDuration * 60) - elapsed;
-                availableAt = Date.now() + (remaining * 1000);
-            } else if (room.state === 'reserved' && room.patient) {
-                availableAt = Date.now() + (room.patient.predictedDuration * 60 * 1000);
-            }
-            
-            availableTimes.push(availableAt);
-        });
-        
-        if (availableTimes.length === 0) return 999;
-        
-        availableTimes.sort((a, b) => a - b);
-        
-        for (let i = 0; i < position; i++) {
-            if (i < availableTimes.length && queue[i]) {
-                availableTimes[i] += (queue[i].predictedDuration || 15) * 60 * 1000;
-                availableTimes.sort((a, b) => a - b);
-            }
-        }
-        
-        const waitMs = availableTimes[0] - Date.now();
-        return Math.max(0, Math.ceil(waitMs / 60000));
-    } catch (error) {
-        console.error('Error calculating wait time:', error);
-        return 15;
+    if (currentHTML !== newHTML) {
+        queueList.innerHTML = newHTML;
     }
 }
 
@@ -818,18 +689,18 @@ async function addPatient() {
 }
 
 // ============================================
-// PATIENT-ROOM MATCHING LOGIC
+// PATIENT-ROOM MATCHING LOGIC - FIXED
 // ============================================
 
 function canPatientGoToRoom(patient, room) {
     // Patient with "Any Doctor"
     if (patient.doctor === 'Any Doctor') {
-        // Can ONLY go to rooms with specific doctors, NOT "Any Doctor" rooms
-        return !room.assignedDoctors.includes('Any Doctor') && room.assignedDoctors.length > 0;
+        // Can ONLY go to rooms with "Any Doctor"
+        return room.assignedDoctors.includes('Any Doctor');
     }
     
     // Patient with specific doctor
-    // Can go to rooms that include that specific doctor
+    // Can ONLY go to rooms that include that specific doctor
     // CANNOT go to "Any Doctor" rooms
     if (room.assignedDoctors.includes('Any Doctor')) {
         return false;
@@ -855,90 +726,75 @@ async function processAutomation() {
 }
 
 async function autoFillAvailableRooms() {
-    const roomsSnapshot = await db.collection('clinics').doc(currentClinic.id)
-        .collection('rooms')
-        .where('state', '==', 'available')
-        .get();
+    const rooms = cachedRooms.filter(r => r.state === 'available');
+    const queue = cachedQueue;
 
-    if (roomsSnapshot.empty) return;
+    if (rooms.length === 0 || queue.length === 0) return;
 
-    const queueSnapshot = await db.collection('clinics').doc(currentClinic.id)
-        .collection('queue')
-        .orderBy('addedTime')
-        .get();
-
-    if (queueSnapshot.empty) return;
-
-    for (const roomDoc of roomsSnapshot.docs) {
-        const room = roomDoc.data();
-        
-        for (const patientDoc of queueSnapshot.docs) {
-            const patient = patientDoc.data();
-            
+    for (const room of rooms) {
+        for (const patient of queue) {
             if (canPatientGoToRoom(patient, room)) {
-                // Move patient to room
-                await roomDoc.ref.update({
-                    patient: {
-                        id: patientDoc.id,
-                        name: patient.name,
-                        phone: patient.phone,
-                        doctor: patient.doctor,
-                        reason: patient.reason,
-                        predictedDuration: patient.predictedDuration
-                    },
-                    state: 'reserved',
-                    timerStart: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                try {
+                    const roomRef = db.collection('clinics').doc(currentClinic.id)
+                        .collection('rooms').doc(room.docId);
 
-                // Remove from queue
-                await patientDoc.ref.delete();
+                    await roomRef.update({
+                        patient: {
+                            id: patient.docId,
+                            name: patient.name,
+                            phone: patient.phone,
+                            doctor: patient.doctor,
+                            reason: patient.reason,
+                            predictedDuration: patient.predictedDuration
+                        },
+                        state: 'reserved',
+                        timerStart: firebase.firestore.FieldValue.serverTimestamp()
+                    });
 
-                // Send notifications
-                await sendNotification(patient, 'immediate', room.name, patientDoc.id);
-                await sendNotification(patient, 'advanced', room.name, patientDoc.id);
-                
-                break;
+                    await db.collection('clinics').doc(currentClinic.id)
+                        .collection('queue').doc(patient.docId).delete();
+
+                    await sendNotification(patient, 'immediate', room.name, patient.docId);
+                    
+                    break;
+                } catch (error) {
+                    console.error('Error auto-filling room:', error);
+                }
             }
         }
     }
 }
 
 async function autoCompleteExpiredRooms() {
-    const roomsSnapshot = await db.collection('clinics').doc(currentClinic.id)
-        .collection('rooms')
-        .where('state', '==', 'occupied')
-        .get();
+    const rooms = cachedRooms.filter(r => r.state === 'occupied');
 
-    for (const roomDoc of roomsSnapshot.docs) {
-        const room = roomDoc.data();
-        
+    for (const room of rooms) {
         if (room.patient && room.timerStart) {
             const startTime = room.timerStart.toMillis ? room.timerStart.toMillis() : room.timerStart;
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
             const remaining = (room.patient.predictedDuration * 60) - elapsed;
             
             if (remaining <= 0) {
-                await roomDoc.ref.update({
-                    state: 'available',
-                    patient: null,
-                    timerStart: null
-                });
+                await db.collection('clinics').doc(currentClinic.id)
+                    .collection('rooms')
+                    .doc(room.docId)
+                    .update({
+                        state: 'available',
+                        patient: null,
+                        timerStart: null
+                    });
             }
         }
     }
 }
 
 async function checkAdvancedNotifications() {
-    const roomsSnapshot = await db.collection('clinics').doc(currentClinic.id)
-        .collection('rooms')
-        .where('state', '==', 'occupied')
-        .get();
+    const rooms = cachedRooms.filter(r => r.state === 'occupied');
+    const queue = cachedQueue;
 
     let roomsAboutToFinish = [];
     
-    for (const roomDoc of roomsSnapshot.docs) {
-        const room = roomDoc.data();
-        
+    for (const room of rooms) {
         if (room.patient && room.timerStart) {
             const startTime = room.timerStart.toMillis ? room.timerStart.toMillis() : room.timerStart;
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -952,25 +808,20 @@ async function checkAdvancedNotifications() {
 
     if (roomsAboutToFinish.length === 0) return;
 
-    const queueSnapshot = await db.collection('clinics').doc(currentClinic.id)
-        .collection('queue')
-        .orderBy('addedTime')
-        .get();
-
     let notified = 0;
     
-    for (const patientDoc of queueSnapshot.docs) {
+    for (const patient of queue) {
         if (notified >= roomsAboutToFinish.length) break;
-        
-        const patient = patientDoc.data();
         
         if (patient.advancedNotificationSent) continue;
         
         const compatibleRoom = roomsAboutToFinish.find(r => canPatientGoToRoom(patient, r));
         
         if (compatibleRoom) {
-            await sendNotification(patient, 'advanced', null, patientDoc.id);
-            await patientDoc.ref.update({ advancedNotificationSent: true });
+            await sendNotification(patient, 'advanced', null, patient.docId);
+            await db.collection('clinics').doc(currentClinic.id)
+                .collection('queue').doc(patient.docId)
+                .update({ advancedNotificationSent: true });
             notified++;
         }
     }
@@ -978,7 +829,6 @@ async function checkAdvancedNotifications() {
 
 async function sendNotification(patient, type, roomName, patientId) {
     try {
-        // Check if notification already sent
         const existing = await db.collection('clinics').doc(currentClinic.id)
             .collection('notifications')
             .where('patientId', '==', patientId)
@@ -1004,9 +854,9 @@ async function sendNotification(patient, type, roomName, patientId) {
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
 
-        // Send SMS via Twilio (requires backend function)
+        // Send SMS via Twilio - FIXED
         try {
-            await fetch(TWILIO_ENDPOINT, {
+            const response = await fetch(TWILIO_ENDPOINT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1014,8 +864,14 @@ async function sendNotification(patient, type, roomName, patientId) {
                     message: `${currentClinic.name}: ${message}`
                 })
             });
+
+            if (!response.ok) {
+                console.error('SMS failed:', await response.text());
+            } else {
+                console.log('SMS sent successfully to', patient.phone);
+            }
         } catch (error) {
-            console.log('SMS sending (Twilio):', message, 'to', patient.phone);
+            console.error('SMS sending error:', error);
         }
     } catch (error) {
         console.error('Error sending notification:', error);
@@ -1094,7 +950,6 @@ async function updateRoomCount() {
         const currentRoomCount = roomsSnapshot.size;
 
         if (num > currentRoomCount) {
-            // Add rooms
             for (let i = currentRoomCount; i < num; i++) {
                 await db.collection('clinics').doc(currentClinic.id)
                     .collection('rooms').add({
@@ -1108,7 +963,6 @@ async function updateRoomCount() {
                     });
             }
         } else if (num < currentRoomCount) {
-            // Remove rooms (only empty ones)
             const roomsToDelete = roomsSnapshot.docs.slice(num);
             for (const doc of roomsToDelete) {
                 const room = doc.data();
@@ -1117,8 +971,6 @@ async function updateRoomCount() {
                 }
             }
         }
-
-        renderRooms();
     } catch (error) {
         console.error('Error updating room count:', error);
     }
@@ -1325,7 +1177,6 @@ async function performSwap(queueDocId) {
 
         const newPatient = newPatientDoc.data();
         
-        // Put current patient back in queue
         await db.collection('clinics').doc(currentClinic.id)
             .collection('queue').add({
                 name: currentPatient.name,
@@ -1333,15 +1184,13 @@ async function performSwap(queueDocId) {
                 doctor: currentPatient.doctor,
                 reason: currentPatient.reason,
                 predictedDuration: currentPatient.predictedDuration,
-                addedTime: firebase.firestore.Timestamp.fromMillis(Date.now() - 1000000), // Put at front
+                addedTime: firebase.firestore.Timestamp.fromMillis(Date.now() - 1000000),
                 advancedNotificationSent: false,
                 immediateNotificationSent: false
             });
 
-        // Delete new patient from queue
         await newPatientDoc.ref.delete();
 
-        // Update room with new patient
         await roomDoc.ref.update({
             patient: {
                 id: queueDocId,
