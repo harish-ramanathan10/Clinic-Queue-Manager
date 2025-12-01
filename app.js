@@ -423,14 +423,17 @@ function updateDoctorDropdowns() {
 // GEMINI INTEGRATION - FIXED WITH PROPER ASYNC
 // ============================================
 
+// ============================================
+// GEMINI INTEGRATION - FIXED
+// ============================================
+
 async function getPredictedDuration(reason) {
-    console.log('🤖 Requesting Gemini prediction for:', reason);
-    
     const commonDurations = {
         'checkup': 15,
         'consultation': 20,
         'follow-up': 10,
         'followup': 10,
+        'follow up': 10,
         'vaccination': 10,
         'vaccine': 10,
         'physical': 30,
@@ -439,21 +442,19 @@ async function getPredictedDuration(reason) {
         'pain': 20,
         'injury': 25,
         'cold': 10,
-        'flu': 15
+        'flu': 15,
+        'cough': 12,
+        'headache': 15
     };
 
     const reasonLower = reason.toLowerCase();
     for (const [key, duration] of Object.entries(commonDurations)) {
         if (reasonLower.includes(key)) {
-            console.log(`✓ Using keyword match: ${duration} minutes`);
             return duration;
         }
     }
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
-
         const response = await fetch(GEMINI_API_URL, {
             method: 'POST',
             headers: {
@@ -471,36 +472,121 @@ async function getPredictedDuration(reason) {
                     topP: 0.8,
                     topK: 10
                 }
-            }),
-            signal: controller.signal
+            })
         });
-
-        clearTimeout(timeoutId);
 
         if (response.ok) {
             const data = await response.json();
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            const duration = parseInt(text?.trim());
             
-            if (duration && duration >= 10 && duration <= 60) {
-                console.log(`✓ Gemini predicted: ${duration} minutes for "${reason}"`);
-                return duration;
-            } else {
-                console.warn('Gemini returned invalid duration:', text);
+            if (text) {
+                const cleanText = text.trim().replace(/\D/g, '');
+                const duration = parseInt(cleanText);
+                
+                if (duration && duration >= 10 && duration <= 60) {
+                    return duration;
+                }
             }
-        } else {
-            console.error('Gemini API error:', response.status, await response.text());
         }
     } catch (error) {
-        if (error.name === 'AbortError') {
-            console.warn('⏱ Gemini request timeout');
-        } else {
-            console.error('Gemini API error:', error);
-        }
+        // Silent fail, use default
     }
 
-    console.log('Using default: 15 minutes');
     return 15;
+}
+
+// ============================================
+// UPDATED ADD PATIENT FUNCTIONS
+// ============================================
+
+async function addPatient() {
+    const name = document.getElementById('patientName').value.trim();
+    const phone = document.getElementById('patientPhone').value.trim();
+    const doctor = document.getElementById('patientDoctor').value;
+    const reason = document.getElementById('patientReason').value.trim();
+
+    if (!name || !phone || !reason) {
+        alert('Please fill all required fields');
+        return;
+    }
+
+    const btn = document.getElementById('addPatientBtn');
+    const originalText = btn.textContent;
+    btn.textContent = 'Adding...';
+    btn.disabled = true;
+
+    try {
+        const duration = await getPredictedDuration(reason);
+        
+        await db.collection('clinics').doc(currentClinic.id)
+            .collection('queue').add({
+                name,
+                phone,
+                doctor,
+                reason,
+                addedTime: firebase.firestore.FieldValue.serverTimestamp(),
+                predictedDuration: duration,
+                advancedNotificationSent: false,
+                immediateNotificationSent: false
+            });
+
+        document.getElementById('patientName').value = '';
+        document.getElementById('patientPhone').value = '';
+        document.getElementById('patientReason').value = '';
+        document.getElementById('patientDoctor').value = 'Any Doctor';
+
+        setTimeout(() => processAutomation(), 100);
+    } catch (error) {
+        alert('Error adding patient');
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function addPatientFromMobile() {
+    const name = document.getElementById('mobilePatientName').value.trim();
+    const phone = document.getElementById('mobilePhone').value.trim();
+    const doctor = document.getElementById('mobileDoctorSelect').value;
+    const reason = document.getElementById('mobileReason').value.trim();
+
+    if (!name || !phone || !reason) {
+        alert('Please fill all fields');
+        return;
+    }
+
+    const btn = document.getElementById('addPatientMobileBtn');
+    const originalText = btn.textContent;
+    btn.textContent = 'Adding...';
+    btn.disabled = true;
+
+    try {
+        const duration = await getPredictedDuration(reason);
+        
+        await db.collection('clinics').doc(currentClinic.id)
+            .collection('queue').add({
+                name,
+                phone,
+                doctor,
+                reason,
+                addedTime: firebase.firestore.FieldValue.serverTimestamp(),
+                predictedDuration: duration,
+                advancedNotificationSent: false,
+                immediateNotificationSent: false
+            });
+
+        document.getElementById('mobilePatientName').value = '';
+        document.getElementById('mobilePhone').value = '';
+        document.getElementById('mobileReason').value = '';
+        document.getElementById('mobileDoctorSelect').value = 'Any Doctor';
+
+        alert('✓ You have been added to the queue successfully!');
+    } catch (error) {
+        alert('Error adding to queue');
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
 }
 
 // ============================================
@@ -1321,3 +1407,4 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
