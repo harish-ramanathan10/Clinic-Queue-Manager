@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clinic Queue Monitor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Add Account Screen -->
+    <div id="addAccountScreen" class="auth-container">
+        <h2>Create Clinic Account</h2>
+        <div class="form-group">
+            <label>Clinic Name</label>
+            <input type="text" id="newClinicName" placeholder="Enter clinic name">
+        </div>
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="newPassword1" placeholder="Enter password">
+        </div>
+        <div class="form-group">
+            <label>Confirm Password</label>
+            <input type="password" id="newPassword2" placeholder="Confirm password">
+        </div>
+        <button class="btn" id="createAccountBtn">Create Account</button>
+        <button class="btn btn-secondary" id="backToLoginBtn">Back to Login</button>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="loginScreen" class="auth-container" style="display: none;">
+        <h2>Clinic Login</h2>
+        <div class="form-group">
+            <label>Select Clinic</label>
+            <select id="clinicSelect">
+                <option value="">-- Select Clinic --</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="loginPassword" placeholder="Enter password">
+        </div>
+        <button class="btn" id="loginBtn">Login</button>
+        <button class="btn btn-secondary" id="showAddAccountBtn">Create New Account</button>
+    </div>
+
+    <!-- Mobile Patient Addition -->
+    <div id="mobileAddPatient" class="mobile-add-patient" style="display: none;">
+        <h2 id="mobileClinicName"></h2>
+        <div class="mobile-subtitle">Add yourself to the queue</div>
+        <div class="form-group">
+            <label>Patient Name</label>
+            <input type="text" id="mobilePatientName" placeholder="Enter your name">
+        </div>
+        <div class="form-group">
+            <label>Phone Number</label>
+            <input type="tel" id="mobilePhone" placeholder="Enter your phone number">
+        </div>
+        <div class="form-group">
+            <label>Doctor Preference</label>
+            <select id="mobileDoctorSelect">
+                <option value="Any Doctor">Any Doctor</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Reason for Visit</label>
+            <input type="text" id="mobileReason" placeholder="e.g., checkup, consultation">
+        </div>
+        <button class="btn" id="addPatientMobileBtn">Add to Queue</button>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard" class="dashboard">
+        <div class="header">
+            <h1>Clinic Queue Monitor</h1>
+            <div class="header-buttons">
+                <button class="header-btn" id="settingsBtn">Settings</button>
+                <button class="header-btn" id="patientLinkBtn">Patient Link</button>
+                <button class="header-btn logout-btn" id="logoutBtn">Logout</button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="left-section">
+                <div class="rooms-grid" id="roomsGrid"></div>
+                <div class="notifications-section">
+                    <h3>Sent Notifications</h3>
+                    <div id="notificationsList"></div>
+                </div>
+            </div>
+
+            <div class="right-section">
+                <div class="queue-header">
+                    <h2>NEXT IN LINE</h2>
+                    <div class="queue-count" id="queueCount">0 waiting</div>
+                </div>
+                <div class="queue-list" id="queueList"></div>
+                <hr class="queue-divider">
+                <div class="add-patient-section">
+                    <h3>Add Patient Manually</h3>
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="patientName" placeholder="Patient name">
+                    </div>
+                    <div class="form-group">
+                        <label>Phone</label>
+                        <input type="tel" id="patientPhone" placeholder="+1 (555) 123-4567">
+                    </div>
+                    <div class="form-group">
+                        <label>Doctor</label>
+                        <select id="patientDoctor">
+                            <option value="Any Doctor">Any Doctor</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Reason (Optional)</label>
+                        <input type="text" id="patientReason" placeholder="e.g., chest pain, fever, checkup">
+                    </div>
+                    <button class="btn" id="addPatientBtn">Add to Queue</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <span class="modal-close" id="closeSettingsBtn">&times;</span>
+            </div>
+            <div class="form-group">
+                <label>Number of Rooms (1-10)</label>
+                <input type="number" id="numRooms" min="1" max="10" value="4">
+            </div>
+            <hr style="margin: 25px 0; border: none; border-top: 1px solid #e5e7eb;">
+            <h3 style="margin-bottom: 16px; font-size: 16px; font-weight: 600;">Manage Doctors</h3>
+            <div class="form-group">
+                <label>Add Doctor</label>
+                <input type="text" id="newDoctorName" placeholder="Enter doctor name">
+                <button class="btn" style="margin-top: 10px;" id="addDoctorBtn">Add Doctor</button>
+            </div>
+            <div class="doctor-list" id="doctorList"></div>
+        </div>
+    </div>
+
+    <!-- Patient Link Modal -->
+    <div id="linkModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Patient Addition Link</h2>
+                <span class="modal-close" id="closeLinkBtn">&times;</span>
+            </div>
+            <p style="color: #6b7280; margin-bottom: 16px; font-size: 14px;">
+                Share this link with patients so they can add themselves to the queue from any device.
+            </p>
+            <div class="link-display">
+                <input type="text" id="patientLinkInput" readonly>
+                <button class="link-copy-btn" id="copyLinkBtn">Copy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Assign Doctor Modal -->
+    <div id="assignDoctorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Assign Doctors to <span id="assignRoomName"></span></h2>
+                <span class="modal-close" id="closeAssignBtn">&times;</span>
+            </div>
+            <div class="checkbox-group" id="doctorCheckboxes"></div>
+            <button class="btn" id="saveRoomDoctorsBtn">Save</button>
+        </div>
+    </div>
+
+    <!-- Swap Patient Modal -->
+    <div id="swapModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Select Patient to Swap</h2>
+                <span class="modal-close" id="closeSwapBtn">&times;</span>
+            </div>
+            <div id="swapPatientList"></div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    
+    <script src="app.js"></script>
+</body>
+</html>
