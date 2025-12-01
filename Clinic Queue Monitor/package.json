@@ -1,0 +1,17 @@
+{
+  "name": "clinic-queue-monitor",
+  "version": "1.0.0",
+  "description": "Modern clinic queue management system",
+  "main": "index.html",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'No build step required'",
+    "deploy": "netlify deploy --prod"
+  },
+  "dependencies": {
+    "twilio": "^4.19.0"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.10.1"
+  }
+}
