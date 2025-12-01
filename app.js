@@ -422,77 +422,50 @@ function updateDoctorDropdowns() {
 // ============================================
 // GEMINI INTEGRATION - FIXED WITH PROPER ASYNC
 // ============================================
-
-// ============================================
-// GEMINI INTEGRATION - FIXED
-// ============================================
-
 async function getPredictedDuration(reason) {
-    const commonDurations = {
-        'checkup': 15,
-        'consultation': 20,
-        'follow-up': 10,
-        'followup': 10,
-        'follow up': 10,
-        'vaccination': 10,
-        'vaccine': 10,
-        'physical': 30,
-        'emergency': 45,
-        'fever': 15,
-        'pain': 20,
-        'injury': 25,
-        'cold': 10,
-        'flu': 15,
-        'cough': 12,
-        'headache': 15
-    };
-
-    const reasonLower = reason.toLowerCase();
-    for (const [key, duration] of Object.entries(commonDurations)) {
-        if (reasonLower.includes(key)) {
-            return duration;
-        }
-    }
-
     try {
         const response = await fetch(GEMINI_API_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 contents: [{
                     parts: [{
-                        text: `You are a medical scheduling AI. A patient visits a clinic with this reason: "${reason}". Based on typical medical practice, estimate the appointment duration in minutes. Consider: routine checkups (10-15min), consultations (15-25min), procedures (30-45min), emergencies (45-60min). Respond with ONLY a number between 10 and 60. No text, just the number.`
+                        text: `You are a medical scheduling AI. A patient visits a clinic with this reason: "${reason}". Based on typical medical practice, estimate the appointment duration in minutes. Answer with ONLY a number between 10 and 60.`
                     }]
                 }],
                 generationConfig: {
                     temperature: 0.1,
-                    maxOutputTokens: 10,
-                    topP: 0.8,
-                    topK: 10
+                    maxOutputTokens: 10
                 }
             })
         });
 
-        if (response.ok) {
-            const data = await response.json();
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            
-            if (text) {
-                const cleanText = text.trim().replace(/\D/g, '');
-                const duration = parseInt(cleanText);
-                
-                if (duration && duration >= 10 && duration <= 60) {
-                    return duration;
-                }
-            }
-        }
-    } catch (error) {
-        // Silent fail, use default
-    }
+        const data = await response.json();
 
-    return 15;
+        // --- Handle all known Gemini response formats ---
+        let text =
+            data?.candidates?.[0]?.content?.parts?.[0]?.text ||          // Format A
+            data?.candidates?.[0]?.content?.[0]?.parts?.[0]?.text ||     // Format B
+            data?.candidates?.[0]?.output ||                             // Some proxies return {output:"20"}
+            null;
+
+        if (!text) {
+            console.warn("Gemini error: unexpected response format", data);
+            return 15;
+        }
+
+        const clean = text.trim().replace(/\D/g, ""); // extract digits
+        const duration = parseInt(clean);
+
+        if (duration >= 10 && duration <= 60) return duration;
+
+        console.warn("Gemini returned invalid duration:", text);
+        return 15;
+
+    } catch (err) {
+        console.error("Gemini fetch failed:", err);
+        return 15;
+    }
 }
 
 // ============================================
@@ -1407,4 +1380,5 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
