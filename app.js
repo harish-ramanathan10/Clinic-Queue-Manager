@@ -8,7 +8,6 @@ const firebaseConfig = {
   appId: "1:251920408420:web:afd3554f6f789b2b37a471",
 };
 
-// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
@@ -24,12 +23,13 @@ let updateInterval = null;
 // Cache for reducing reads
 let cachedRooms = [];
 let cachedQueue = [];
+let isProcessingAutomation = false;
 
 // Gemini API Configuration
 const GEMINI_API_KEY = "AIzaSyCdXxqaC1Wenpd0G3ihGcH9liAhI28_4Qs";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-// Twilio Configuration - Correct endpoint
+// Twilio Configuration
 const TWILIO_ENDPOINT = "/.netlify/functions/send-sms";
 
 // ============================================
@@ -306,9 +306,15 @@ async function addPatientFromMobile() {
         return;
     }
 
-    const duration = await getPredictedDuration(reason);
-    
+    // Show loading state
+    const btn = document.getElementById('addPatientMobileBtn');
+    const originalText = btn.textContent;
+    btn.textContent = 'Adding...';
+    btn.disabled = true;
+
     try {
+        const duration = await getPredictedDuration(reason);
+        
         await db.collection('clinics').doc(currentClinic.id)
             .collection('queue').add({
                 name,
@@ -330,6 +336,9 @@ async function addPatientFromMobile() {
     } catch (error) {
         console.error('Error adding patient:', error);
         alert('Error adding to queue');
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
     }
 }
 
@@ -411,30 +420,40 @@ function updateDoctorDropdowns() {
 }
 
 // ============================================
-// GEMINI INTEGRATION - FIXED
+// GEMINI INTEGRATION - FIXED WITH PROPER ASYNC
 // ============================================
 
 async function getPredictedDuration(reason) {
+    console.log('🤖 Requesting Gemini prediction for:', reason);
+    
     const commonDurations = {
         'checkup': 15,
         'consultation': 20,
         'follow-up': 10,
+        'followup': 10,
         'vaccination': 10,
+        'vaccine': 10,
         'physical': 30,
         'emergency': 45,
         'fever': 15,
         'pain': 20,
-        'injury': 25
+        'injury': 25,
+        'cold': 10,
+        'flu': 15
     };
 
     const reasonLower = reason.toLowerCase();
     for (const [key, duration] of Object.entries(commonDurations)) {
         if (reasonLower.includes(key)) {
+            console.log(`✓ Using keyword match: ${duration} minutes`);
             return duration;
         }
     }
 
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+
         const response = await fetch(GEMINI_API_URL, {
             method: 'POST',
             headers: {
@@ -443,29 +462,44 @@ async function getPredictedDuration(reason) {
             body: JSON.stringify({
                 contents: [{
                     parts: [{
-                        text: `You are a medical scheduling assistant. Based on this reason for a clinic visit: "${reason}", estimate the typical appointment duration in minutes. Consider standard medical practice. Respond with ONLY a single number between 10 and 60 representing minutes. No explanation, just the number.`
+                        text: `You are a medical scheduling AI. A patient visits a clinic with this reason: "${reason}". Based on typical medical practice, estimate the appointment duration in minutes. Consider: routine checkups (10-15min), consultations (15-25min), procedures (30-45min), emergencies (45-60min). Respond with ONLY a number between 10 and 60. No text, just the number.`
                     }]
                 }],
                 generationConfig: {
                     temperature: 0.1,
-                    maxOutputTokens: 10
+                    maxOutputTokens: 10,
+                    topP: 0.8,
+                    topK: 10
                 }
-            })
+            }),
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         if (response.ok) {
             const data = await response.json();
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            const duration = parseInt(text?.match(/\d+/)?.[0]);
+            const duration = parseInt(text?.trim());
+            
             if (duration && duration >= 10 && duration <= 60) {
-                console.log(`Gemini predicted ${duration} minutes for: ${reason}`);
+                console.log(`✓ Gemini predicted: ${duration} minutes for "${reason}"`);
                 return duration;
+            } else {
+                console.warn('Gemini returned invalid duration:', text);
             }
+        } else {
+            console.error('Gemini API error:', response.status, await response.text());
         }
     } catch (error) {
-        console.error('Gemini API error:', error);
+        if (error.name === 'AbortError') {
+            console.warn('⏱ Gemini request timeout');
+        } else {
+            console.error('Gemini API error:', error);
+        }
     }
 
+    console.log('Using default: 15 minutes');
     return 15;
 }
 
@@ -494,18 +528,19 @@ function renderRooms() {
                 </div>
             </div>
             <div class="room-doctor" onclick="window.openAssignDoctor('${room.docId}')">
-                ${room.assignedDoctors.join(', ')}
+                👨‍⚕️ ${room.assignedDoctors.join(', ')}
             </div>
         `;
 
         if (room.state === 'available') {
-            // NO FILL BUTTON for available state per specifications
+            // NO buttons for available state per specifications
         } else if (room.patient) {
             content += `
                 <div class="room-patient-info">
                     <div><strong>${room.patient.name}</strong></div>
                     <div>Doctor: ${room.patient.doctor}</div>
                     <div>Reason: ${room.patient.reason}</div>
+                    <div style="font-size: 12px; color: #9ca3af;">Duration: ${room.patient.predictedDuration} min</div>
                 </div>
                 <div class="room-timer">${getTimerDisplay(room)}</div>
                 <div class="timer-label">${room.state === 'reserved' ? 'TIME WAITING' : 'TIME REMAINING'}</div>
@@ -606,7 +641,7 @@ window.completeAppointment = async function(roomDocId) {
 };
 
 // ============================================
-// QUEUE RENDERING & MANAGEMENT - FIXED JITTERING
+// QUEUE RENDERING & MANAGEMENT
 // ============================================
 
 function renderQueue() {
@@ -640,7 +675,7 @@ function renderQueue() {
                 <div class="queue-position">#${i + 1} ${patient.name}</div>
                 <div class="queue-detail">Doctor: ${patient.doctor}</div>
                 <div class="queue-detail">${patient.reason}</div>
-                <div class="queue-detail">${addedTime.toLocaleTimeString()}</div>
+                <div class="queue-detail">${addedTime.toLocaleTimeString()} · ${patient.predictedDuration || 15} min est.</div>
             </div>
         `;
     }
@@ -661,9 +696,15 @@ async function addPatient() {
         return;
     }
 
-    const duration = await getPredictedDuration(reason);
-    
+    // Show loading state
+    const btn = document.getElementById('addPatientBtn');
+    const originalText = btn.textContent;
+    btn.textContent = 'Adding...';
+    btn.disabled = true;
+
     try {
+        const duration = await getPredictedDuration(reason);
+        
         await db.collection('clinics').doc(currentClinic.id)
             .collection('queue').add({
                 name,
@@ -685,43 +726,58 @@ async function addPatient() {
     } catch (error) {
         console.error('Error adding patient:', error);
         alert('Error adding patient');
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
     }
 }
 
 // ============================================
-// PATIENT-ROOM MATCHING LOGIC - FIXED
+// PATIENT-ROOM MATCHING LOGIC - CORRECTED
 // ============================================
 
 function canPatientGoToRoom(patient, room) {
+    console.log(`Checking: Patient "${patient.name}" (${patient.doctor}) → Room "${room.name}" (${room.assignedDoctors.join(', ')})`);
+    
     // Patient with "Any Doctor"
     if (patient.doctor === 'Any Doctor') {
-        // Can ONLY go to rooms with "Any Doctor"
-        return room.assignedDoctors.includes('Any Doctor');
+        // Can go to "Any Doctor" rooms OR specific doctor rooms
+        const canGo = room.assignedDoctors.includes('Any Doctor') || 
+                      (room.assignedDoctors.length > 0 && !room.assignedDoctors.includes('Any Doctor'));
+        console.log(`  → Any Doctor patient: ${canGo ? '✓ CAN' : '✗ CANNOT'} go`);
+        return canGo;
     }
     
     // Patient with specific doctor
-    // Can ONLY go to rooms that include that specific doctor
+    // Can ONLY go to rooms with that specific doctor
     // CANNOT go to "Any Doctor" rooms
     if (room.assignedDoctors.includes('Any Doctor')) {
+        console.log(`  → Specific doctor patient to Any Doctor room: ✗ CANNOT go`);
         return false;
     }
     
-    return room.assignedDoctors.includes(patient.doctor);
+    const canGo = room.assignedDoctors.includes(patient.doctor);
+    console.log(`  → Specific doctor patient: ${canGo ? '✓ CAN' : '✗ CANNOT'} go`);
+    return canGo;
 }
 
 // ============================================
-// AUTOMATION & NOTIFICATIONS
+// AUTOMATION & NOTIFICATIONS - FIXED
 // ============================================
 
 async function processAutomation() {
-    if (!currentClinic) return;
+    if (!currentClinic || isProcessingAutomation) return;
 
+    isProcessingAutomation = true;
+    
     try {
         await checkAdvancedNotifications();
         await autoFillAvailableRooms();
         await autoCompleteExpiredRooms();
     } catch (error) {
         console.error('Automation error:', error);
+    } finally {
+        isProcessingAutomation = false;
     }
 }
 
@@ -731,35 +787,49 @@ async function autoFillAvailableRooms() {
 
     if (rooms.length === 0 || queue.length === 0) return;
 
-    for (const room of rooms) {
-        for (const patient of queue) {
-            if (canPatientGoToRoom(patient, room)) {
-                try {
-                    const roomRef = db.collection('clinics').doc(currentClinic.id)
-                        .collection('rooms').doc(room.docId);
+    // Process ONE patient at a time to prevent double-assignment
+    for (const patient of queue) {
+        // Find first compatible available room
+        const compatibleRoom = rooms.find(room => {
+            // Make sure room is still available
+            const currentRoom = cachedRooms.find(r => r.docId === room.docId);
+            return currentRoom && currentRoom.state === 'available' && canPatientGoToRoom(patient, room);
+        });
 
-                    await roomRef.update({
-                        patient: {
-                            id: patient.docId,
-                            name: patient.name,
-                            phone: patient.phone,
-                            doctor: patient.doctor,
-                            reason: patient.reason,
-                            predictedDuration: patient.predictedDuration
-                        },
-                        state: 'reserved',
-                        timerStart: firebase.firestore.FieldValue.serverTimestamp()
-                    });
+        if (compatibleRoom) {
+            try {
+                console.log(`🔄 Auto-assigning ${patient.name} to ${compatibleRoom.name}`);
+                
+                const roomRef = db.collection('clinics').doc(currentClinic.id)
+                    .collection('rooms').doc(compatibleRoom.docId);
 
-                    await db.collection('clinics').doc(currentClinic.id)
-                        .collection('queue').doc(patient.docId).delete();
+                await roomRef.update({
+                    patient: {
+                        id: patient.docId,
+                        name: patient.name,
+                        phone: patient.phone,
+                        doctor: patient.doctor,
+                        reason: patient.reason,
+                        predictedDuration: patient.predictedDuration || 15
+                    },
+                    state: 'reserved',
+                    timerStart: firebase.firestore.FieldValue.serverTimestamp()
+                });
 
-                    await sendNotification(patient, 'immediate', room.name, patient.docId);
-                    
-                    break;
-                } catch (error) {
-                    console.error('Error auto-filling room:', error);
+                await db.collection('clinics').doc(currentClinic.id)
+                    .collection('queue').doc(patient.docId).delete();
+
+                await sendNotification(patient, 'immediate', compatibleRoom.name, patient.docId);
+                
+                // Remove this room from available rooms so it's not reused
+                const roomIndex = rooms.findIndex(r => r.docId === compatibleRoom.docId);
+                if (roomIndex !== -1) {
+                    rooms.splice(roomIndex, 1);
                 }
+                
+                console.log(`✓ Successfully assigned ${patient.name} to ${compatibleRoom.name}`);
+            } catch (error) {
+                console.error('Error auto-filling room:', error);
             }
         }
     }
@@ -854,7 +924,8 @@ async function sendNotification(patient, type, roomName, patientId) {
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
 
-        // Send SMS via Twilio - FIXED
+        console.log(`📧 Sending ${type} SMS to ${patient.phone}: ${message}`);
+
         try {
             const response = await fetch(TWILIO_ENDPOINT, {
                 method: 'POST',
@@ -866,9 +937,11 @@ async function sendNotification(patient, type, roomName, patientId) {
             });
 
             if (!response.ok) {
-                console.error('SMS failed:', await response.text());
+                const errorText = await response.text();
+                console.error('❌ SMS failed:', errorText);
             } else {
-                console.log('SMS sent successfully to', patient.phone);
+                const result = await response.json();
+                console.log('✓ SMS sent successfully:', result.messageSid);
             }
         } catch (error) {
             console.error('SMS sending error:', error);
@@ -1137,10 +1210,13 @@ window.openSwap = async function(roomDocId) {
         const swapList = document.getElementById('swapPatientList');
         swapList.innerHTML = '';
         
+        let hasCompatible = false;
+        
         queueSnapshot.docs.forEach((doc, idx) => {
             const patient = doc.data();
             
             if (canPatientGoToRoom(patient, room)) {
+                hasCompatible = true;
                 const card = document.createElement('div');
                 card.className = 'queue-card';
                 card.innerHTML = `
@@ -1153,6 +1229,10 @@ window.openSwap = async function(roomDocId) {
                 swapList.appendChild(card);
             }
         });
+        
+        if (!hasCompatible) {
+            swapList.innerHTML = '<div class="notification-empty">No compatible patients in queue</div>';
+        }
         
         document.getElementById('swapModal').style.display = 'flex';
     } catch (error) {
@@ -1198,7 +1278,7 @@ async function performSwap(queueDocId) {
                 phone: newPatient.phone,
                 doctor: newPatient.doctor,
                 reason: newPatient.reason,
-                predictedDuration: newPatient.predictedDuration
+                predictedDuration: newPatient.predictedDuration || 15
             },
             state: 'reserved',
             timerStart: firebase.firestore.FieldValue.serverTimestamp()
