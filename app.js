@@ -1,3 +1,4 @@
+
 // Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyCHjP0JWdv2ndyFTiHE8XVxhdfzRKf7seM",
@@ -102,7 +103,7 @@ async function loadClinics() {
             select.appendChild(opt);
         });
     } catch (error) {
-        console.error('Error loading clinics:', error);
+        alert('Error loading clinics');
     }
 }
 
@@ -164,7 +165,6 @@ async function createAccount() {
         document.getElementById('newPassword2').value = '';
         showLogin();
     } catch (error) {
-        console.error('Error creating account:', error);
         alert('Error creating account');
     }
 }
@@ -178,8 +178,7 @@ function checkAutoLogin() {
                     currentClinic = { id: doc.id, ...doc.data() };
                     showDashboard();
                 }
-            })
-            .catch(error => console.error('Auto login error:', error));
+            });
     }
 }
 
@@ -210,7 +209,6 @@ async function login() {
         sessionStorage.setItem('clinicId', clinicId);
         showDashboard();
     } catch (error) {
-        console.error('Login error:', error);
         alert('Login failed');
     }
 }
@@ -254,7 +252,7 @@ async function logout() {
         document.getElementById('loginScreen').style.display = 'block';
         document.getElementById('loginPassword').value = '';
     } catch (error) {
-        console.error('Logout error:', error);
+        alert('Logout error');
     }
 }
 
@@ -290,55 +288,7 @@ async function showMobileAddPatient(clinicId) {
             mobileSelect.appendChild(opt);
         });
     } catch (error) {
-        console.error('Error loading mobile page:', error);
         alert('Error loading clinic information');
-    }
-}
-
-async function addPatientFromMobile() {
-    const name = document.getElementById('mobilePatientName').value.trim();
-    const phone = document.getElementById('mobilePhone').value.trim();
-    const doctor = document.getElementById('mobileDoctorSelect').value;
-    const reason = document.getElementById('mobileReason').value.trim();
-
-    if (!name || !phone || !reason) {
-        alert('Please fill all fields');
-        return;
-    }
-
-    // Show loading state
-    const btn = document.getElementById('addPatientMobileBtn');
-    const originalText = btn.textContent;
-    btn.textContent = 'Adding...';
-    btn.disabled = true;
-
-    try {
-        const duration = await getPredictedDuration(reason);
-        
-        await db.collection('clinics').doc(currentClinic.id)
-            .collection('queue').add({
-                name,
-                phone,
-                doctor,
-                reason,
-                addedTime: firebase.firestore.FieldValue.serverTimestamp(),
-                predictedDuration: duration,
-                advancedNotificationSent: false,
-                immediateNotificationSent: false
-            });
-
-        document.getElementById('mobilePatientName').value = '';
-        document.getElementById('mobilePhone').value = '';
-        document.getElementById('mobileReason').value = '';
-        document.getElementById('mobileDoctorSelect').value = 'Any Doctor';
-
-        alert('✓ You have been added to the queue successfully!');
-    } catch (error) {
-        console.error('Error adding patient:', error);
-        alert('Error adding to queue');
-    } finally {
-        btn.textContent = originalText;
-        btn.disabled = false;
     }
 }
 
@@ -370,7 +320,7 @@ async function initializeDashboard() {
         
         updateDoctorDropdowns();
     } catch (error) {
-        console.error('Error initializing dashboard:', error);
+        alert('Error initializing dashboard');
     }
 }
 
@@ -420,7 +370,7 @@ function updateDoctorDropdowns() {
 }
 
 // ============================================
-// GEMINI INTEGRATION - NO FALLBACK, MUST WORK
+// GEMINI INTEGRATION - NO FALLBACK
 // ============================================
 async function getPredictedDuration(reason) {
     let retries = 0;
@@ -428,8 +378,6 @@ async function getPredictedDuration(reason) {
     
     while (retries < maxRetries) {
         try {
-            console.log(`🤖 Gemini attempt ${retries + 1}/${maxRetries} for reason: "${reason}"`);
-            
             const response = await fetch(GEMINI_API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -447,49 +395,44 @@ async function getPredictedDuration(reason) {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                throw new Error(`HTTP ${response.status}`);
             }
 
             const data = await response.json();
-            console.log("📥 Gemini raw response:", JSON.stringify(data, null, 2));
 
-            // Handle all known Gemini response formats
             let text =
-                data?.candidates?.[0]?.content?.parts?.[0]?.text ||          // Format A
-                data?.candidates?.[0]?.content?.[0]?.parts?.[0]?.text ||     // Format B
-                data?.candidates?.[0]?.output ||                             // Some proxies
+                data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+                data?.candidates?.[0]?.content?.[0]?.parts?.[0]?.text ||
+                data?.candidates?.[0]?.output ||
                 null;
 
             if (!text) {
-                throw new Error("No text in Gemini response: " + JSON.stringify(data));
+                throw new Error("No text in response");
             }
 
-            const clean = text.trim().replace(/\D/g, ""); // extract only digits
+            const clean = text.trim().replace(/\D/g, "");
             const duration = parseInt(clean);
 
             if (isNaN(duration) || duration < 10 || duration > 60) {
-                throw new Error(`Invalid duration parsed: "${text}" → ${duration}`);
+                throw new Error(`Invalid duration: ${duration}`);
             }
 
-            console.log(`✅ Gemini success: ${duration} minutes`);
             return duration;
 
         } catch (err) {
             retries++;
-            console.error(`❌ Gemini attempt ${retries} failed:`, err.message);
             
             if (retries < maxRetries) {
-                // Wait before retry (exponential backoff)
                 await new Promise(resolve => setTimeout(resolve, 1000 * retries));
             } else {
-                // All retries exhausted
-                throw new Error(`Gemini failed after ${maxRetries} attempts: ${err.message}`);
+                throw err;
             }
         }
     }
 }
+
 // ============================================
-// UPDATED ADD PATIENT FUNCTIONS
+// ADD PATIENT FUNCTIONS
 // ============================================
 
 async function addPatient() {
@@ -505,11 +448,13 @@ async function addPatient() {
 
     const btn = document.getElementById('addPatientBtn');
     const originalText = btn.textContent;
-    btn.textContent = 'Adding...';
+    btn.textContent = 'Getting AI prediction...';
     btn.disabled = true;
 
     try {
         const duration = await getPredictedDuration(reason);
+        
+        btn.textContent = 'Saving to queue...';
         
         await db.collection('clinics').doc(currentClinic.id)
             .collection('queue').add({
@@ -530,7 +475,7 @@ async function addPatient() {
 
         setTimeout(() => processAutomation(), 100);
     } catch (error) {
-        alert('Error adding patient');
+        alert('Failed to get AI prediction. Please check your internet connection and try again.');
     } finally {
         btn.textContent = originalText;
         btn.disabled = false;
@@ -550,11 +495,13 @@ async function addPatientFromMobile() {
 
     const btn = document.getElementById('addPatientMobileBtn');
     const originalText = btn.textContent;
-    btn.textContent = 'Adding...';
+    btn.textContent = 'Getting AI prediction...';
     btn.disabled = true;
 
     try {
         const duration = await getPredictedDuration(reason);
+        
+        btn.textContent = 'Saving to queue...';
         
         await db.collection('clinics').doc(currentClinic.id)
             .collection('queue').add({
@@ -573,9 +520,9 @@ async function addPatientFromMobile() {
         document.getElementById('mobileReason').value = '';
         document.getElementById('mobileDoctorSelect').value = 'Any Doctor';
 
-        alert('✓ You have been added to the queue successfully!');
+        alert(`✓ Added to queue successfully!\nEstimated duration: ${duration} minutes`);
     } catch (error) {
-        alert('Error adding to queue');
+        alert('Failed to get AI prediction. Please check your internet connection and try again.');
     } finally {
         btn.textContent = originalText;
         btn.disabled = false;
@@ -612,7 +559,7 @@ function renderRooms() {
         `;
 
         if (room.state === 'available') {
-            // NO buttons for available state per specifications
+            // NO buttons for available state
         } else if (room.patient) {
             content += `
                 <div class="room-patient-info">
@@ -683,7 +630,7 @@ window.markHere = async function(roomDocId) {
                 timerStart: firebase.firestore.FieldValue.serverTimestamp()
             });
     } catch (error) {
-        console.error('Error marking here:', error);
+        alert('Error marking here');
     }
 };
 
@@ -698,7 +645,7 @@ window.cancelReservation = async function(roomDocId) {
                 timerStart: null
             });
     } catch (error) {
-        console.error('Error canceling reservation:', error);
+        alert('Error canceling reservation');
     }
 };
 
@@ -715,12 +662,12 @@ window.completeAppointment = async function(roomDocId) {
 
         setTimeout(() => processAutomation(), 100);
     } catch (error) {
-        console.error('Error completing appointment:', error);
+        alert('Error completing appointment');
     }
 };
 
 // ============================================
-// QUEUE RENDERING & MANAGEMENT
+// QUEUE RENDERING
 // ============================================
 
 function renderQueue() {
@@ -754,7 +701,7 @@ function renderQueue() {
                 <div class="queue-position">#${i + 1} ${patient.name}</div>
                 <div class="queue-detail">Doctor: ${patient.doctor}</div>
                 <div class="queue-detail">${patient.reason}</div>
-                <div class="queue-detail">${addedTime.toLocaleTimeString()} · ${patient.predictedDuration || 15} min est.</div>
+                <div class="queue-detail">${addedTime.toLocaleTimeString()} · ${patient.predictedDuration} min est.</div>
             </div>
         `;
     }
@@ -764,52 +711,6 @@ function renderQueue() {
     }
 }
 
-async function addPatient() {
-    const name = document.getElementById('patientName').value.trim();
-    const phone = document.getElementById('patientPhone').value.trim();
-    const doctor = document.getElementById('patientDoctor').value;
-    const reason = document.getElementById('patientReason').value.trim();
-
-    if (!name || !phone || !reason) {
-        alert('Please fill all required fields');
-        return;
-    }
-
-    // Show loading state
-    const btn = document.getElementById('addPatientBtn');
-    const originalText = btn.textContent;
-    btn.textContent = 'Adding...';
-    btn.disabled = true;
-
-    try {
-        const duration = await getPredictedDuration(reason);
-        
-        await db.collection('clinics').doc(currentClinic.id)
-            .collection('queue').add({
-                name,
-                phone,
-                doctor,
-                reason,
-                addedTime: firebase.firestore.FieldValue.serverTimestamp(),
-                predictedDuration: duration,
-                advancedNotificationSent: false,
-                immediateNotificationSent: false
-            });
-
-        document.getElementById('patientName').value = '';
-        document.getElementById('patientPhone').value = '';
-        document.getElementById('patientReason').value = '';
-        document.getElementById('patientDoctor').value = 'Any Doctor';
-
-        setTimeout(() => processAutomation(), 100);
-    } catch (error) {
-        console.error('Error adding patient:', error);
-        alert('Error adding patient');
-    } finally {
-        btn.textContent = originalText;
-        btn.disabled = false;
-    }
-}
 
 // ============================================
 // PATIENT-ROOM MATCHING LOGIC - CORRECTED
@@ -1400,6 +1301,7 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
 
