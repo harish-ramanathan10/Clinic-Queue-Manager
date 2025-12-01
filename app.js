@@ -398,6 +398,7 @@ async function getPredictedDuration(reason) {
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
     const duration = parseInt(rawText.replace(/\D/g, ""));
+    alert(duration);
     if (!isNaN(duration) && duration >= 10 && duration <= 60) {
       return duration;
     }
@@ -1279,6 +1280,7 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
 
