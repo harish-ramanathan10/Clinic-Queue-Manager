@@ -545,24 +545,39 @@ function renderRooms() {
 }
 
 function getTimerDisplay(room) {
-    if (!room.timerStart) return '0:00';
+    if (!room.timerStart) return "0:00";
 
-    const startTime = room.timerStart.toMillis ? room.timerStart.toMillis() : room.timerStart;
+    const startTime = room.timerStart.toMillis
+        ? room.timerStart.toMillis()
+        : room.timerStart;
+
+    // If Firestore hasn’t written the timestamp yet → avoid negative countdown
+    if (!startTime || isNaN(startTime) || startTime > Date.now()) {
+        return "0:00";
+    }
+
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    
-    if (room.state === 'reserved') {
+
+    if (room.state === "reserved") {
         const mins = Math.floor(elapsed / 60);
         const secs = elapsed % 60;
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    } else if (room.state === 'occupied' && room.patient) {
-        const remaining = room.patient.predictedDuration * 60 - elapsed;
-        if (remaining <= 0) return '0:00';
+        return `${mins}:${secs.toString().padStart(2, "0")}`;
+    }
+
+    if (room.state === "occupied" && room.patient) {
+        let remaining = room.patient.predictedDuration * 60 - elapsed;
+
+        // Prevent negative values (the fix)
+        if (remaining < 0) remaining = 0;
+
         const mins = Math.floor(remaining / 60);
         const secs = remaining % 60;
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
+        return `${mins}:${secs.toString().padStart(2, "0")}`;
     }
-    return '0:00';
+
+    return "0:00";
 }
+
 
 function getActionButtons(room) {
     if (room.state === 'reserved') {
@@ -1266,6 +1281,7 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
 
