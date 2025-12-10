@@ -575,21 +575,22 @@ function getTimerDisplay(room) {
     if (!room.timerStart) return '0:00';
 
     const startTime = room.timerStart.toMillis ? room.timerStart.toMillis() : room.timerStart;
-    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const elapsed = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
     
     if (room.state === 'reserved') {
         const mins = Math.floor(elapsed / 60);
         const secs = elapsed % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     } else if (room.state === 'occupied' && room.patient) {
-        const remaining = room.patient.predictedDuration * 60 - elapsed;
-        if (remaining <= 0) return '0:00';
+        const totalSeconds = room.patient.predictedDuration * 60;
+        const remaining = Math.max(0, totalSeconds - elapsed);
         const mins = Math.floor(remaining / 60);
         const secs = remaining % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
     return '0:00';
 }
+
 
 function getActionButtons(room) {
     if (room.state === 'reserved') {
@@ -1293,6 +1294,7 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
 
