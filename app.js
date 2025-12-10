@@ -26,6 +26,10 @@ let cachedRooms = [];
 let cachedQueue = [];
 let isProcessingAutomation = false;
 
+// Gemini API Configuration
+const GEMINI_API_KEY = "AIzaSyBmdgffAFFMFhbVW1s0l3VgWhXrLaBKo8Q";
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
 // Twilio Configuration
 const TWILIO_ENDPOINT = "/.netlify/functions/send-sms";
 
@@ -365,32 +369,55 @@ function updateDoctorDropdowns() {
     });
 }
 
-// Replace the GEMINI section in app.js with this:
-
 // ============================================
-// GEMINI INTEGRATION - SECURE WITH NETLIFY FUNCTIONS
+// GEMINI INTEGRATION - FINAL + RELIABLE
 // ============================================
-
-const GEMINI_ENDPOINT = "/.netlify/functions/get-duration";
 
 async function getPredictedDuration(reason) {
+  const modelName = "gemini-2.5-flash";  // ← use a valid, supported model
   try {
-    const response = await fetch(GEMINI_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason })
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `Time estimate required medical appointment duration in minutes (5–10). Respond with ONLY one number.
 
-    if (!response.ok) {
-      console.warn("Gemini function failed → fallback used");
-      return 7;
-    }
+I want you to be the receptionist at a fast-paced medical clinic, and your role is to estimate how long each patient’s appointment with the doctor will take only based on the reason for the visit that the patient provides. Your estimate should be a whole number between 4 and 12 minutes. You will only return a number with no additional formatting. Here are some sample sessions, you will only return the number in the output section for the given input/reason.
+
+input: prescription refill authorisation | output: 4
+input: blood pressure check | output: 4
+
+input: heart attack | output: 12
+input: major cuts and bleeding | output: 12
+
+For your prediction right now, here is the reason that you will estimate the appointment time for: ${reason}`
+                }
+              ]
+            }
+          ]
+        }),
+      }
+    );
 
     const data = await response.json();
-    return data.duration || 7;
 
-  } catch (error) {
-    console.warn("Gemini request failed → fallback used", error);
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const duration = parseInt(rawText.replace(/\D/g, ""), 10);
+
+    if (!isNaN(duration) && duration >= 2 && duration <= 15) {
+      return duration;
+    } else {
+      console.warn("Gemini returned unclear value → fallback used");
+      return 7;
+    }
+  } catch (e) {
+    console.warn("Gemini request failed → fallback used", e);
     return 7;
   }
 }
@@ -474,7 +501,7 @@ async function addPatientFromMobile() {
                 phone,
                 doctor,
                 reason,
-                addedTime: Date.now(),
+                addedTime: firebase.firestore.FieldValue.serverTimestamp(),
                 predictedDuration: duration,
                 advancedNotificationSent: false,
                 immediateNotificationSent: false
@@ -545,39 +572,24 @@ function renderRooms() {
 }
 
 function getTimerDisplay(room) {
-    if (!room.timerStart) return "0:00";
+    if (!room.timerStart) return '0:00';
 
-    const startTime = room.timerStart.toMillis
-        ? room.timerStart.toMillis()
-        : room.timerStart;
-
-    // If Firestore hasn’t written the timestamp yet → avoid negative countdown
-    if (!startTime || isNaN(startTime) || startTime > Date.now()) {
-        return "0:00";
-    }
-
+    const startTime = room.timerStart.toMillis ? room.timerStart.toMillis() : room.timerStart;
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
-
-    if (room.state === "reserved") {
+    
+    if (room.state === 'reserved') {
         const mins = Math.floor(elapsed / 60);
         const secs = elapsed % 60;
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
-    }
-
-    if (room.state === "occupied" && room.patient) {
-        let remaining = room.patient.predictedDuration * 60 - elapsed;
-
-        // Prevent negative values (the fix)
-        if (remaining < 0) remaining = 0;
-
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    } else if (room.state === 'occupied' && room.patient) {
+        const remaining = room.patient.predictedDuration * 60 - elapsed;
+        if (remaining <= 0) return '0:00';
         const mins = Math.floor(remaining / 60);
         const secs = remaining % 60;
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
-
-    return "0:00";
+    return '0:00';
 }
-
 
 function getActionButtons(room) {
     if (room.state === 'reserved') {
@@ -1281,7 +1293,6 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
-
 
 
 
