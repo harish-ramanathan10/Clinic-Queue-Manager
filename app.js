@@ -474,7 +474,7 @@ async function addPatientFromMobile() {
                 phone,
                 doctor,
                 reason,
-                addedTime: firebase.firestore.FieldValue.serverTimestamp(),
+                addedTime: Date.now(),
                 predictedDuration: duration,
                 advancedNotificationSent: false,
                 immediateNotificationSent: false
@@ -1281,6 +1281,7 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
 
