@@ -1,9 +1,6 @@
 // FILE: netlify/functions/get-duration.js
 
-const fetch = require("node-fetch");
-
 exports.handler = async (event) => {
-  // Only allow POST
   if (event.httpMethod !== "POST") {
     return {
       statusCode: 405,
@@ -25,14 +22,13 @@ exports.handler = async (event) => {
     const MODEL = "gemini-2.5-flash";
 
     if (!API_KEY) {
-      console.error("Gemini API key missing");
       return {
         statusCode: 500,
-        body: JSON.stringify({ error: "Server config error" })
+        body: JSON.stringify({ error: "Server config error: Missing GEMINI_API_KEY" })
       };
     }
 
-    // Call Gemini API
+    // Use native Node 18 fetch — no node-fetch required
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`,
       {
@@ -44,8 +40,8 @@ exports.handler = async (event) => {
               parts: [
                 {
                   text: `
-Time estimate required medical appointment duration in minutes (4–12).
-Respond ONLY with a number. No words or sentences.
+Estimate appointment duration (4–12 minutes).
+Reply ONLY with a number. No words.
 
 Reason: ${reason}
                   `
@@ -62,7 +58,6 @@ Reason: ${reason}
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const duration = parseInt(rawText.replace(/\D/g, ""), 10);
 
-    // Validate
     if (!isNaN(duration) && duration >= 4 && duration <= 12) {
       return {
         statusCode: 200,
@@ -70,10 +65,9 @@ Reason: ${reason}
       };
     }
 
-    // Fallback
     return {
       statusCode: 200,
-      body: JSON.stringify({ duration: 7 })
+      body: JSON.stringify({ duration: 7 }) // fallback
     };
 
   } catch (err) {
