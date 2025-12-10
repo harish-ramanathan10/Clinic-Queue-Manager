@@ -574,8 +574,23 @@ function renderRooms() {
 function getTimerDisplay(room) {
     if (!room.timerStart) return '0:00';
 
-    const startTime = room.timerStart.toMillis ? room.timerStart.toMillis() : room.timerStart;
-    const elapsed = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+    // Handle pending Firebase timestamp
+    let startTime;
+    if (room.timerStart.toMillis) {
+        startTime = room.timerStart.toMillis();
+    } else if (typeof room.timerStart === 'number') {
+        startTime = room.timerStart;
+    } else {
+        // Timestamp is still pending from Firebase
+        return '0:00';
+    }
+
+    // Additional check: if startTime is in the future (clock skew), wait
+    if (startTime > Date.now()) {
+        return '0:00';
+    }
+
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
     
     if (room.state === 'reserved') {
         const mins = Math.floor(elapsed / 60);
@@ -1294,6 +1309,7 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
 
