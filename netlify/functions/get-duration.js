@@ -54,6 +54,8 @@ Reason: ${reason}
     );
 
     const data = await response.json();
+    alert("AI returned duration: " + JSON.stringify(data));
+
 
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const duration = parseInt(rawText.replace(/\D/g, ""), 10);
