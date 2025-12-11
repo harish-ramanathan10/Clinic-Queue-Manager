@@ -26,10 +26,6 @@ let cachedRooms = [];
 let cachedQueue = [];
 let isProcessingAutomation = false;
 
-// Gemini API Configuration
-const GEMINI_API_KEY = "AIzaSyBmdgffAFFMFhbVW1s0l3VgWhXrLaBKo8Q";
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
 // Twilio Configuration
 const TWILIO_ENDPOINT = "/.netlify/functions/send-sms";
 
@@ -369,55 +365,32 @@ function updateDoctorDropdowns() {
     });
 }
 
+// Replace the GEMINI section in app.js with this:
+
 // ============================================
-// GEMINI INTEGRATION - FINAL + RELIABLE
+// GEMINI INTEGRATION - SECURE WITH NETLIFY FUNCTIONS
 // ============================================
+
+const GEMINI_ENDPOINT = "/.netlify/functions/get-duration";
 
 async function getPredictedDuration(reason) {
-  const modelName = "gemini-2.5-flash";  // ← use a valid, supported model
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `Time estimate required medical appointment duration in minutes (5–10). Respond with ONLY one number.
+    const response = await fetch(GEMINI_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason })
+    });
 
-I want you to be the receptionist at a fast-paced medical clinic, and your role is to estimate how long each patient’s appointment with the doctor will take only based on the reason for the visit that the patient provides. Your estimate should be a whole number between 4 and 12 minutes. You will only return a number with no additional formatting. Here are some sample sessions, you will only return the number in the output section for the given input/reason.
-
-input: prescription refill authorisation | output: 4
-input: blood pressure check | output: 4
-
-input: heart attack | output: 12
-input: major cuts and bleeding | output: 12
-
-For your prediction right now, here is the reason that you will estimate the appointment time for: ${reason}`
-                }
-              ]
-            }
-          ]
-        }),
-      }
-    );
-
-    const data = await response.json();
-    alert("AI returned duration: " + JSON.stringify(data));
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const duration = parseInt(rawText.replace(/\D/g, ""), 10);
-
-    if (!isNaN(duration) && duration >= 2 && duration <= 15) {
-      return duration;
-    } else {
-      console.warn("Gemini returned unclear value → fallback used");
+    if (!response.ok) {
+      console.warn("Gemini function failed → fallback used");
       return 7;
     }
-  } catch (e) {
-    console.warn("Gemini request failed → fallback used", e);
+
+    const data = await response.json();
+    return data.duration || 7;
+
+  } catch (error) {
+    console.warn("Gemini request failed → fallback used", error);
     return 7;
   }
 }
@@ -574,22 +547,7 @@ function renderRooms() {
 function getTimerDisplay(room) {
     if (!room.timerStart) return '0:00';
 
-    // Handle pending Firebase timestamp
-    let startTime;
-    if (room.timerStart.toMillis) {
-        startTime = room.timerStart.toMillis();
-    } else if (typeof room.timerStart === 'number') {
-        startTime = room.timerStart;
-    } else {
-        // Timestamp is still pending from Firebase
-        return '0:00';
-    }
-
-    // Additional check: if startTime is in the future (clock skew), wait
-    if (startTime > Date.now()) {
-        return '0:00';
-    }
-
+    const startTime = room.timerStart.toMillis ? room.timerStart.toMillis() : room.timerStart;
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     
     if (room.state === 'reserved') {
@@ -597,15 +555,14 @@ function getTimerDisplay(room) {
         const secs = elapsed % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     } else if (room.state === 'occupied' && room.patient) {
-        const totalSeconds = room.patient.predictedDuration * 60;
-        const remaining = Math.max(0, totalSeconds - elapsed);
+        const remaining = room.patient.predictedDuration * 60 - elapsed;
+        if (remaining <= 0) return '0:00';
         const mins = Math.floor(remaining / 60);
         const secs = remaining % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
     return '0:00';
 }
-
 
 function getActionButtons(room) {
     if (room.state === 'reserved') {
@@ -1309,11 +1266,6 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
-
-
-
-
-
 
 
 
