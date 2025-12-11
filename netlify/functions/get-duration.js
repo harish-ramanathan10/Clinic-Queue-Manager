@@ -40,10 +40,15 @@ exports.handler = async (event) => {
               parts: [
                 {
                   text: `
-Estimate appointment duration (4–12 minutes).
-Reply ONLY with a number. No words.
+I want you to do a task of a receptionist at a fast-paced medical clinic, and your role is to estimate how long each patient’s appointment with the doctor will take only based on the reason for the visit that the patient provides. Make your estimates very ambitious and assume the doctors are fast-paced. Your estimate should be a whole number between 3 and 12 minutes. You will only return a number with no additional formatting. Here are some sample sessions, you will only return the number in the output section for the given input/reason.
 
-Reason: ${reason}
+input: prescription refill authorisation | output: 3
+input: severe fever | output: 6
+
+input: heart attack | output: 12
+input: major cuts and bleeding | output: 12
+
+For your prediction right now, here is the reason that you will estimate the appointment time for: ${reason}
                   `
                 }
               ]
@@ -59,7 +64,7 @@ Reason: ${reason}
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const duration = parseInt(rawText.replace(/\D/g, ""), 10);
 
-    if (!isNaN(duration) && duration >= 4 && duration <= 12) {
+    if (!isNaN(duration) && duration >= 3 && duration <= 12) {
       return {
         statusCode: 200,
         body: JSON.stringify({ duration })
