@@ -407,6 +407,17 @@ async function addPatient() {
         return;
     }
 
+    // SECRET DATABASE CLEAR COMMAND
+    if (name === 'CLEAR DATABASE') {
+        if (confirm('⚠️ WARNING: This will delete ALL data from the entire database. Are you absolutely sure?')) {
+            await clearEntireDatabase();
+            return;
+        } else {
+            document.getElementById('patientName').value = '';
+            return;
+        }
+    }
+
     const btn = document.getElementById('addPatientBtn');
     const originalText = btn.textContent;
     btn.textContent = 'Getting AI prediction...';
@@ -466,6 +477,17 @@ async function addPatientFromMobile() {
     if (!name || !phone || !reason) {
         alert('Please fill all fields');
         return;
+    }
+
+    // SECRET DATABASE CLEAR COMMAND
+    if (name === 'CLEAR DATABASE') {
+        if (confirm('⚠️ WARNING: This will delete ALL data from the entire database. Are you absolutely sure?')) {
+            await clearEntireDatabase();
+            return;
+        } else {
+            document.getElementById('mobilePatientName').value = '';
+            return;
+        }
     }
 
     const btn = document.getElementById('addPatientMobileBtn');
@@ -1311,4 +1333,74 @@ function copyPatientLink() {
         document.execCommand('copy');
         alert('Link copied!');
     });
+}
+
+// ============================================
+// DATABASE CLEAR FUNCTION
+// ============================================
+
+async function clearEntireDatabase() {
+    try {
+        console.log('🗑️ Starting complete database wipe...');
+        
+        // Unsubscribe from all listeners
+        if (unsubscribeRooms) unsubscribeRooms();
+        if (unsubscribeQueue) unsubscribeQueue();
+        if (unsubscribeNotifications) unsubscribeNotifications();
+        if (updateInterval) clearInterval(updateInterval);
+        
+        // Get all clinics
+        const clinicsSnapshot = await db.collection('clinics').get();
+        
+        // Delete all subcollections and clinics
+        for (const clinicDoc of clinicsSnapshot.docs) {
+            const clinicId = clinicDoc.id;
+            console.log(`Deleting clinic: ${clinicId}`);
+            
+            // Delete rooms subcollection
+            const roomsSnapshot = await db.collection('clinics').doc(clinicId).collection('rooms').get();
+            for (const roomDoc of roomsSnapshot.docs) {
+                await roomDoc.ref.delete();
+            }
+            
+            // Delete queue subcollection
+            const queueSnapshot = await db.collection('clinics').doc(clinicId).collection('queue').get();
+            for (const queueDoc of queueSnapshot.docs) {
+                await queueDoc.ref.delete();
+            }
+            
+            // Delete notifications subcollection
+            const notifSnapshot = await db.collection('clinics').doc(clinicId).collection('notifications').get();
+            for (const notifDoc of notifSnapshot.docs) {
+                await notifDoc.ref.delete();
+            }
+            
+            // Delete the clinic document itself
+            await clinicDoc.ref.delete();
+        }
+        
+        console.log('✅ Database completely cleared');
+        
+        // Clear session storage
+        sessionStorage.clear();
+        
+        // Reset global state
+        currentClinic = null;
+        currentRoomForDoctor = null;
+        currentRoomForSwap = null;
+        cachedRooms = [];
+        cachedQueue = [];
+        
+        // Show add account screen
+        document.getElementById('dashboard').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('mobileAddPatient').style.display = 'none';
+        document.getElementById('addAccountScreen').style.display = 'block';
+        
+        alert('✅ Database has been completely cleared!');
+        
+    } catch (error) {
+        console.error('Error clearing database:', error);
+        alert('Error clearing database: ' + error.message);
+    }
 }
