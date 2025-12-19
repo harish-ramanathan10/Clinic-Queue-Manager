@@ -485,9 +485,7 @@ async function addPatientFromMobile() {
         document.getElementById('mobileReason').value = '';
         document.getElementById('mobileDoctorSelect').value = 'Any Doctor';
 
-        alert(`✓ Added to queue successfully!\nEstimated duration: ${duration} minutes`);
     } catch (error) {
-        alert('Failed to get AI prediction. Please check your internet connection and try again.');
     } finally {
         btn.textContent = originalText;
         btn.disabled = false;
@@ -1266,6 +1264,7 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
+
 
 
 
