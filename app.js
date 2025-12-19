@@ -1,4 +1,3 @@
-
 // Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyCHjP0JWdv2ndyFTiHE8XVxhdfzRKf7seM",
@@ -365,8 +364,6 @@ function updateDoctorDropdowns() {
     });
 }
 
-// Replace the GEMINI section in app.js with this:
-
 // ============================================
 // GEMINI INTEGRATION - SECURE WITH NETLIFY FUNCTIONS
 // ============================================
@@ -395,9 +392,8 @@ async function getPredictedDuration(reason) {
   }
 }
 
-
 // ============================================
-// ADD PATIENT FUNCTIONS
+// ADD PATIENT FUNCTIONS WITH PRIORITY SYSTEM
 // ============================================
 
 async function addPatient() {
@@ -419,6 +415,18 @@ async function addPatient() {
     try {
         const duration = await getPredictedDuration(reason);
         
+        // Calculate priority based on duration
+        let priority = 'normal';
+        let prioritySubtraction = 0;
+        
+        if (duration >= 10) {
+            priority = 'severe';
+            prioritySubtraction = 5;
+        } else if (duration >= 7) {
+            priority = 'moderate';
+            prioritySubtraction = 2;
+        }
+        
         btn.textContent = 'Saving to queue...';
         
         await db.collection('clinics').doc(currentClinic.id)
@@ -427,8 +435,10 @@ async function addPatient() {
                 phone,
                 doctor,
                 reason,
-                addedTime: firebase.firestore.FieldValue.serverTimestamp(),
+                addedTime: firebase.firestore.Timestamp.fromMillis(Date.now() - (prioritySubtraction * 60 * 1000)),
                 predictedDuration: duration,
+                displayDuration: duration,
+                priority: priority,
                 advancedNotificationSent: false,
                 immediateNotificationSent: false
             });
@@ -466,6 +476,18 @@ async function addPatientFromMobile() {
     try {
         const duration = await getPredictedDuration(reason);
         
+        // Calculate priority based on duration
+        let priority = 'normal';
+        let prioritySubtraction = 0;
+        
+        if (duration >= 10) {
+            priority = 'severe';
+            prioritySubtraction = 5;
+        } else if (duration >= 7) {
+            priority = 'moderate';
+            prioritySubtraction = 2;
+        }
+        
         btn.textContent = 'Saving to queue...';
         
         await db.collection('clinics').doc(currentClinic.id)
@@ -474,8 +496,10 @@ async function addPatientFromMobile() {
                 phone,
                 doctor,
                 reason,
-                addedTime: firebase.firestore.FieldValue.serverTimestamp(),
+                addedTime: firebase.firestore.Timestamp.fromMillis(Date.now() - (prioritySubtraction * 60 * 1000)),
                 predictedDuration: duration,
+                displayDuration: duration,
+                priority: priority,
                 advancedNotificationSent: false,
                 immediateNotificationSent: false
             });
@@ -529,7 +553,7 @@ function renderRooms() {
                     <div><strong>${room.patient.name}</strong></div>
                     <div>Doctor: ${room.patient.doctor}</div>
                     <div>Reason: ${room.patient.reason}</div>
-                    <div style="font-size: 12px; color: #9ca3af;">Duration: ${room.patient.predictedDuration} min</div>
+                    <div style="font-size: 12px; color: #9ca3af;">Duration: ${room.patient.displayDuration || room.patient.predictedDuration} min</div>
                 </div>
                 <div class="room-timer">${getTimerDisplay(room)}</div>
                 <div class="timer-label">${room.state === 'reserved' ? 'TIME WAITING' : 'TIME REMAINING'}</div>
@@ -630,7 +654,7 @@ window.completeAppointment = async function(roomDocId) {
 };
 
 // ============================================
-// QUEUE RENDERING
+// QUEUE RENDERING WITH PRIORITY BADGES
 // ============================================
 
 function renderQueue() {
@@ -658,13 +682,23 @@ function renderQueue() {
     for (let i = 0; i < queue.length; i++) {
         const patient = queue[i];
         const addedTime = patient.addedTime?.toDate ? patient.addedTime.toDate() : new Date(patient.addedTime);
+        const displayDuration = patient.displayDuration || patient.predictedDuration;
+        const priority = patient.priority || 'normal';
+        
+        let priorityBadge = '';
+        if (priority === 'severe') {
+            priorityBadge = '<span style="position: absolute; top: 8px; right: 8px; background: #ef4444; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">SEVERE</span>';
+        } else if (priority === 'moderate') {
+            priorityBadge = '<span style="position: absolute; top: 8px; right: 8px; background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">MODERATE</span>';
+        }
         
         newHTML += `
-            <div class="queue-card">
+            <div class="queue-card" style="position: relative;">
+                ${priorityBadge}
                 <div class="queue-position">#${i + 1} ${patient.name}</div>
                 <div class="queue-detail">Doctor: ${patient.doctor}</div>
                 <div class="queue-detail">${patient.reason}</div>
-                <div class="queue-detail">${addedTime.toLocaleTimeString()} · ${patient.predictedDuration} min est.</div>
+                <div class="queue-detail">${addedTime.toLocaleTimeString()} · ${displayDuration} min est.</div>
             </div>
         `;
     }
@@ -674,9 +708,8 @@ function renderQueue() {
     }
 }
 
-
 // ============================================
-// PATIENT-ROOM MATCHING LOGIC - CORRECTED
+// PATIENT-ROOM MATCHING LOGIC
 // ============================================
 
 function canPatientGoToRoom(patient, room) {
@@ -705,7 +738,7 @@ function canPatientGoToRoom(patient, room) {
 }
 
 // ============================================
-// AUTOMATION & NOTIFICATIONS - FIXED
+// AUTOMATION & NOTIFICATIONS
 // ============================================
 
 async function processAutomation() {
@@ -753,7 +786,9 @@ async function autoFillAvailableRooms() {
                         phone: patient.phone,
                         doctor: patient.doctor,
                         reason: patient.reason,
-                        predictedDuration: patient.predictedDuration || 15
+                        predictedDuration: patient.predictedDuration || 15,
+                        displayDuration: patient.displayDuration || patient.predictedDuration || 15,
+                        priority: patient.priority || 'normal'
                     },
                     state: 'reserved',
                     timerStart: firebase.firestore.FieldValue.serverTimestamp()
@@ -1207,6 +1242,8 @@ async function performSwap(queueDocId) {
                 doctor: currentPatient.doctor,
                 reason: currentPatient.reason,
                 predictedDuration: currentPatient.predictedDuration,
+                displayDuration: currentPatient.displayDuration || currentPatient.predictedDuration,
+                priority: currentPatient.priority || 'normal',
                 addedTime: firebase.firestore.Timestamp.fromMillis(Date.now() - 1000000),
                 advancedNotificationSent: false,
                 immediateNotificationSent: false
@@ -1221,7 +1258,9 @@ async function performSwap(queueDocId) {
                 phone: newPatient.phone,
                 doctor: newPatient.doctor,
                 reason: newPatient.reason,
-                predictedDuration: newPatient.predictedDuration || 15
+                predictedDuration: newPatient.predictedDuration || 15,
+                displayDuration: newPatient.displayDuration || newPatient.predictedDuration || 15,
+                priority: newPatient.priority || 'normal'
             },
             state: 'reserved',
             timerStart: firebase.firestore.FieldValue.serverTimestamp()
@@ -1264,10 +1303,3 @@ function copyPatientLink() {
         alert('Link copied!');
     });
 }
-
-
-
-
-
-
-
