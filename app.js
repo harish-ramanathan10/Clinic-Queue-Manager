@@ -681,9 +681,18 @@ function renderQueue() {
 
     for (let i = 0; i < queue.length; i++) {
         const patient = queue[i];
-        const addedTime = patient.addedTime?.toDate ? patient.addedTime.toDate() : new Date(patient.addedTime);
-        const displayDuration = patient.displayDuration || patient.predictedDuration;
+        // Calculate the actual time they were added (without backend adjustment)
         const priority = patient.priority || 'normal';
+        let prioritySubtraction = 0;
+        if (priority === 'severe') prioritySubtraction = 5;
+        else if (priority === 'moderate') prioritySubtraction = 2;
+        
+        // Add back the subtracted time to show the real time they joined
+        const actualAddedTime = patient.addedTime?.toDate ? 
+            new Date(patient.addedTime.toDate().getTime() + (prioritySubtraction * 60 * 1000)) : 
+            new Date(patient.addedTime + (prioritySubtraction * 60 * 1000));
+        
+        const displayDuration = patient.displayDuration || patient.predictedDuration;
         
         let priorityBadge = '';
         if (priority === 'severe') {
@@ -698,7 +707,7 @@ function renderQueue() {
                 <div class="queue-position">#${i + 1} ${patient.name}</div>
                 <div class="queue-detail">Doctor: ${patient.doctor}</div>
                 <div class="queue-detail">${patient.reason}</div>
-                <div class="queue-detail">${addedTime.toLocaleTimeString()} · ${displayDuration} min est.</div>
+                <div class="queue-detail">${actualAddedTime.toLocaleTimeString()} · ${displayDuration} min est.</div>
             </div>
         `;
     }
